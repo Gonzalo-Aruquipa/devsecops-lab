@@ -12,6 +12,7 @@ permissions:
   id-token: write
 
 jobs:
+  # 1. SECRET SCANNING
   secret-scanning:
     name: 1. Secret Scanning (Gitleaks)
     runs-on: ubuntu-latest
@@ -24,16 +25,18 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+  # 2. SAST (Análisis Estático del Código de la App)
   sast:
     name: 2. SAST (Semgrep)
     needs: secret-scanning
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Ejecutar Semgrep
+      - name: Ejecutar Semgrep en app/
         run: |
-          docker run --rm -v "${{ github.workspace }}:/src" returntocorp/semgrep semgrep scan --config auto --error
+          docker run --rm -v "${{ github.workspace }}:/src" returntocorp/semgrep semgrep scan --config auto --error app/
 
+  # 3. SCA (Análisis de Dependencias)
   sca:
     name: 3. SCA (Trivy Filesystem)
     needs: secret-scanning
@@ -48,6 +51,7 @@ jobs:
           severity: 'HIGH,CRITICAL'
           exit-code: '1'
 
+  # 4. IaC SECURITY
   iac-security:
     name: 4. IaC Security (Checkov)
     needs: secret-scanning
@@ -61,6 +65,7 @@ jobs:
           framework: 'terraform,dockerfile'
           soft_fail: false
 
+  # 5. BUILD, CONTAINER SCAN & GENERACIÓN DE SBOM
   build-and-sbom:
     name: 5. Build, Container Scan & SBOM
     needs: [sast, sca, iac-security]
@@ -70,41 +75,48 @@ jobs:
       IMAGE_NAME: ${{ github.repository }}
     steps:
       - uses: actions/checkout@v4
+
       - name: Iniciar sesión en GitHub Container Registry
         uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Extraer metadatos de la imagen
         id: meta
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: type=sha
+
       - name: Compilar Imagen Docker Local
         uses: docker/build-push-action@v5
         with:
           context: .
           load: true
           tags: ${{ steps.meta.outputs.tags }}
+
       - name: Generar SBOM con Syft
         uses: anchore/sbom-action@v0
         with:
           image: ${{ steps.meta.outputs.tags }}
           format: cyclonedx-json
           output-file: 'sbom.cyclonedx.json'
+
       - name: Publicar SBOM como Artefacto
         uses: actions/upload-artifact@v4
         with:
           name: sbom-cyclonedx
           path: sbom.cyclonedx.json
+
       - name: Escaneo de Imagen Docker con Trivy
         uses: aquasecurity/trivy-action@master
         with:
           image-ref: ${{ steps.meta.outputs.tags }}
           severity: 'CRITICAL'
           exit-code: '1'
+
       - name: Publicar Imagen en GHCR
         uses: docker/build-push-action@v5
         with:
@@ -112,6 +124,7 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
 
+  # 6. FIRMA CRIPTOGRÁFICA DE CONTENEDORES
   sign-container:
     name: 6. Firma de Artefacto (Cosign Keyless)
     needs: build-and-sbom
@@ -122,12 +135,14 @@ jobs:
     steps:
       - name: Instalar Cosign
         uses: sigstore/cosign-installer@v3.5.0
+
       - name: Iniciar sesión en GHCR
         uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Firmar Imagen mediante Sigstore (OIDC Keyless)
         run: |
           IMAGE_REF="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:sha-${{ github.sha }}"
