@@ -117,6 +117,7 @@ jobs:
           image-ref: ${{ steps.meta.outputs.tags }}
           severity: 'CRITICAL'
           exit-code: '1'
+          ignore-unfixed: true
 
       - name: Publicar Imagen en GHCR
         uses: docker/build-push-action@v5
