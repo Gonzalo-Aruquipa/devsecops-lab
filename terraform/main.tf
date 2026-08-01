@@ -6,6 +6,7 @@ provider "aws" {
 resource "aws_kms_key" "clave" {
   description         = "Clave KMS para cifrado de buckets y SNS"
   enable_key_rotation = true
+  policy              = data.aws_iam_policy_document.kms_politica.json
 }
 
 # ---------- Bucket principal ----------
@@ -136,5 +137,20 @@ resource "aws_security_group" "sg_seguro" {
     to_port     = 22
     protocol    = "tcp"
     cidr_blocks = ["10.0.0.0/16"]
+  }
+}
+
+data "aws_caller_identity" "actual" {}
+
+data "aws_iam_policy_document" "kms_politica" {
+  statement {
+    sid       = "PermitirAdministracionPorCuentaRaiz"
+    effect    = "Allow"
+    actions   = ["kms:*"]
+    resources = ["*"]
+    principals {
+      type        = "AWS"
+      identifiers = ["arn:aws:iam::${data.aws_caller_identity.actual.account_id}:root"]
+    }
   }
 }
