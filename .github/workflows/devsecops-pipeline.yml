@@ -147,5 +147,8 @@ jobs:
 
       - name: Firmar Imagen mediante Sigstore (OIDC Keyless)
         run: |
-          IMAGE_REF="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:sha-${{ github.sha }}"
+          IMAGE_NAME_LOWER=$(echo "${{ env.IMAGE_NAME }}" | tr '[:upper:]' '[:lower:]')
+          SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+          IMAGE_REF="${{ env.REGISTRY }}/${IMAGE_NAME_LOWER}:sha-${SHORT_SHA}"
+          echo "Firmando: $IMAGE_REF"
           cosign sign --yes "$IMAGE_REF"
